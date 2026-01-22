@@ -185,6 +185,18 @@ a{color:inherit}
 /* Chat pane */
 .chat{padding:12px;border-radius:12px;min-height:420px;display:flex;flex-direction:column;background:transparent;border:1px solid rgba(255,255,255,0.01)}
 .messages{flex:1;overflow:auto;padding:12px;display:flex;flex-direction:column;gap:12px;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,0.06) transparent}
+
+.typing{
+  margin: 0 12px 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  color: var(--muted);
+  font-size: 0.9rem;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid rgba(255,255,255,0.02);
+}
+.typing.small{font-size:0.85rem}
+
 .msg{max-width:78%;padding:12px;border-radius:12px;background:var(--bubble-incoming);border:1px solid rgba(255,255,255,0.02);animation: msgIn 160ms ease-out}
 .msg .meta{font-size:0.78rem;color:var(--muted);margin-bottom:8px;font-weight:600;display:flex;align-items:center;gap:8px;justify-content:space-between}
 .msg .body{white-space:pre-wrap;color:var(--text);line-height:1.45}
