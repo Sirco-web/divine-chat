@@ -25,7 +25,6 @@
         <button id="btnCreate" class="btn main">Create Room</button>
         <button id="btnJoin" class="btn main">Join Room</button>
         <button id="btnGlobal" class="btn main">Global Chat</button>
-        <!-- Settings button is now same style as other main buttons (no outline) -->
         <button id="btnSettings" class="btn main">Settings</button>
       </div>
     </section>
@@ -36,9 +35,13 @@
         <h2 id="chatTitle" class="chat-title">Private Chat</h2>
         <div class="chat-meta-row">
           <div id="safeIndicator" class="safe-indicator" title="Safe room: refresh will kick everyone">Safe: ON</div>
+          <div id="lockIndicator" class="safe-indicator" title="Room lock status">Lock: OFF</div>
         </div>
+
         <div class="chat-actions-row">
           <button id="btnClear" class="btn action gold" title="Host only — Ctrl+Alt+C">Clear Chat</button>
+          <button id="btnLock" class="btn action purple" title="Host only">Lock Room</button>
+          <button id="btnReassign" class="btn action gold" title="Host only">Reassign Host</button>
           <button id="btnLeave" class="btn action muted">Leave Room</button>
         </div>
       </div>
@@ -74,7 +77,7 @@
       </div>
     </section>
 
-    <!-- Modal (used for create, join, settings) -->
+    <!-- Modal (used for create, join, settings, reassign) -->
     <div id="modal" class="modal hidden" role="dialog" aria-modal="true">
       <div class="modal-card">
         <button id="modalClose" class="modal-close" aria-label="Close">✕</button>
@@ -106,6 +109,17 @@
           </div>
         </div>
 
+        <div id="reassignForm" class="form hidden">
+          <h2>Reassign Host</h2>
+          <div id="reassignHelp" style="opacity:.7;margin-top:8px">
+            Click a user to make them host.
+          </div>
+          <div id="reassignList" class="reassign-list" style="margin-top:12px"></div>
+          <div class="modal-actions" style="margin-top:14px">
+            <button id="reassignClose" class="btn muted">Done</button>
+          </div>
+        </div>
+
         <div id="settingsForm" class="form hidden">
           <h2>Settings</h2>
 
@@ -123,7 +137,6 @@
             </div>
 
             <div class="theme-section">
-              <!-- LIGHT row -->
               <div class="theme-row">
                 <div class="theme-row-header">
                   <div class="theme-row-title">Light themes</div>
@@ -139,7 +152,6 @@
                 </div>
               </div>
 
-              <!-- DARK row -->
               <div class="theme-row">
                 <div class="theme-row-header">
                   <div class="theme-row-title">Dark themes</div>
