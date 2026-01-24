@@ -6,16 +6,27 @@
   const btnJoin = document.getElementById('btnJoin');
   const btnGlobal = document.getElementById('btnGlobal');
   const btnSettings = document.getElementById('btnSettings');
+
+  const btnLock = document.getElementById('btnLock');
+  const btnReassign = document.getElementById('btnReassign');
+  const lockIndicator = document.getElementById('lockIndicator');
+
   const modal = document.getElementById('modal');
   const createForm = document.getElementById('createForm');
   const joinForm = document.getElementById('joinForm');
   const settingsForm = document.getElementById('settingsForm');
+  const reassignForm = document.getElementById('reassignForm');
+
   const modalClose = document.getElementById('modalClose');
   const createSubmit = document.getElementById('createSubmit');
   const joinSubmit = document.getElementById('joinSubmit');
   const createCancel = document.getElementById('createCancel');
   const joinCancel = document.getElementById('joinCancel');
   const settingsClose = document.getElementById('settingsClose');
+  const reassignClose = document.getElementById('reassignClose');
+
+  const reassignList = document.getElementById('reassignList');
+
   const pane = document.getElementById('pane');
   const hero = document.getElementById('hero');
   const chatTitle = document.getElementById('chatTitle');
@@ -43,6 +54,11 @@
   let myUsername = null;
   let ownerId = null;
   let ownerName = null;
+  let isGlobalRoom = false;
+  let roomLocked = false;
+
+  // Per-room token (persisted)
+  let roomTokenId = null;
 
   // Typing state
   let typingTimeout = null;
@@ -138,7 +154,6 @@
   }
 
   function applySettingsToUI() {
-    // Remove theme classes
     document.body.classList.remove(
       'theme-forest','theme-amethyst','theme-ocean','theme-kawaii','theme-space','theme-golden',
       'theme-sky','theme-strawberry','theme-mint','theme-lemon'
@@ -146,13 +161,11 @@
 
     if (settings.themeClass) document.body.classList.add(settings.themeClass);
 
-    // Light vs Dark base
     if (settings.theme === 'light') document.body.classList.add('light-mode');
     else document.body.classList.remove('light-mode');
 
     toggleShortcut.checked = !!settings.shortcutEnabled;
 
-    // mark active theme
     themeOptions.forEach(opt => {
       const cls = opt.getAttribute('data-theme-class') || '';
       const themeKey = opt.getAttribute('data-theme') || '';
@@ -160,10 +173,7 @@
       else opt.classList.remove('active');
     });
 
-    // Motion class
     document.body.classList.toggle('reduced-motion', !!settings.reducedMotion);
-
-    // Stars
     document.body.classList.toggle('stars-on', !!settings.starsEnabled && !settings.reducedMotion);
 
     buildStars();
@@ -192,18 +202,36 @@
     createForm.classList.add('hidden');
     joinForm.classList.add('hidden');
     settingsForm.classList.add('hidden');
+    reassignForm.classList.add('hidden');
+
     if (which === 'create') createForm.classList.remove('hidden');
     if (which === 'join') joinForm.classList.remove('hidden');
     if (which === 'settings') settingsForm.classList.remove('hidden');
+    if (which === 'reassign') reassignForm.classList.remove('hidden');
+
     const first = modal.querySelector('.form:not(.hidden) input');
     first && first.focus();
   }
   function closeModal() { modal.classList.add('hidden'); }
 
+  // --------------------
+  // Join link support: /?room=CODE
+  // --------------------
+  (function autoJoinFromLink() {
+    try {
+      const url = new URL(window.location.href);
+      const room = url.searchParams.get('room');
+      if (!room) return;
+      showModal('join');
+      const joinCode = document.getElementById('joinCode');
+      joinCode.value = room;
+      // password left blank on purpose
+    } catch {}
+  })();
+
   btnCreate.addEventListener('click', () => showModal('create'));
   btnJoin.addEventListener('click', () => showModal('join'));
 
-  // Settings button: same color as other buttons (remove outline style on index.html too)
   btnSettings.addEventListener('click', () => {
     settings = loadSettings();
     applySettingsToUI();
@@ -215,13 +243,14 @@
     if (!name) return;
     socket.emit('joinGlobal', { username: name }, (res) => {
       if (!res || !res.ok) return showToast(res && res.message ? res.message : 'Failed to join global', 3000, 'error');
-      enterRoom(res.room, name, res.messages || [], res.users || [], res.ownerId, res.ownerUsername);
+      acceptJoinResponse(res, name);
     });
   });
 
   modalClose.addEventListener('click', closeModal);
   createCancel.addEventListener('click', closeModal);
   joinCancel.addEventListener('click', closeModal);
+  reassignClose.addEventListener('click', closeModal);
 
   settingsClose.addEventListener('click', () => {
     settings.shortcutEnabled = !!toggleShortcut.checked;
@@ -230,7 +259,6 @@
     closeModal();
   });
 
-  // Theme options
   themeOptions.forEach(btn => {
     btn.addEventListener('click', () => {
       const cls = btn.getAttribute('data-theme-class') || '';
@@ -238,12 +266,10 @@
 
       settings.themeClass = cls;
 
-      // Determine light/dark base for new themes
       const lightThemes = new Set(['light','kawaii','sky','strawberry','mint','lemon']);
       if (lightThemes.has(theme)) settings.theme = 'light';
       else settings.theme = 'dark';
 
-      // enable stars for space by default (nice), keep for others
       if (cls === 'theme-space') settings.starsEnabled = true;
 
       saveSettings();
@@ -264,6 +290,31 @@
   const joinCode = document.getElementById('joinCode');
   const joinPassword = document.getElementById('joinPassword');
 
+  function tokenStorageKey(roomCode) {
+    return `divine_chat_room_token_${String(roomCode || '').trim()}`;
+  }
+  function loadRoomToken(roomCode) {
+    try {
+      return localStorage.getItem(tokenStorageKey(roomCode)) || null;
+    } catch {
+      return null;
+    }
+  }
+  function saveRoomToken(roomCode, tokenId) {
+    try {
+      if (!roomCode || !tokenId) return;
+      localStorage.setItem(tokenStorageKey(roomCode), String(tokenId));
+    } catch {}
+  }
+
+  function acceptJoinResponse(res, usernameUsed) {
+    if (res && res.tokenId && res.room && res.room.code) {
+      saveRoomToken(res.room.code, res.tokenId);
+      roomTokenId = res.tokenId;
+    }
+    enterRoom(res.room, usernameUsed, res.messages || [], res.users || [], res.ownerId, res.ownerUsername, res.tokenId);
+  }
+
   createSubmit.addEventListener('click', () => {
     const username = createUsername.value.trim();
     const code = createCode.value.trim();
@@ -271,10 +322,13 @@
     const max = createMax.value;
     const safe = createSafe.checked;
     if (!username || !code) return showToast('Username and Code required', 2500, 'error');
-    socket.emit('createRoom', { username, code, password, maxUsers: max, safe }, (res) => {
+
+    const tokenId = loadRoomToken(code);
+
+    socket.emit('createRoom', { username, code, password, maxUsers: max, safe, tokenId }, (res) => {
       if (!res || !res.ok) return showToast(res && res.message ? res.message : 'Failed to create', 3000, 'error');
-      enterRoom(res.room, username, res.messages || [], res.users || [], res.ownerId, res.ownerUsername);
       closeModal();
+      acceptJoinResponse(res, username);
     });
   });
 
@@ -283,18 +337,37 @@
     const code = joinCode.value.trim();
     const password = joinPassword.value;
     if (!username || !code) return showToast('Username and Code required', 2500, 'error');
-    socket.emit('joinRoom', { username, code, password }, (res) => {
+
+    const tokenId = loadRoomToken(code);
+
+    socket.emit('joinRoom', { username, code, password, tokenId }, (res) => {
       if (!res || !res.ok) return showToast(res && res.message ? res.message : 'Failed to join', 3000, 'error');
-      enterRoom(res.room, username, res.messages || [], res.users || [], res.ownerId, res.ownerUsername);
       closeModal();
+      acceptJoinResponse(res, username);
     });
   });
 
-  function enterRoom(room, username, messages = [], users = [], owner, ownerUsernameParam) {
+  function setLockUi(locked) {
+    roomLocked = !!locked;
+    if (!lockIndicator) return;
+    lockIndicator.textContent = roomLocked ? 'Lock: ON' : 'Lock: OFF';
+    lockIndicator.title = roomLocked ? 'Room is locked' : 'Room is unlocked';
+
+    if (btnLock) {
+      btnLock.textContent = roomLocked ? 'Unlock Room' : 'Lock Room';
+      btnLock.disabled = isGlobalRoom || (ownerId !== socket.id);
+      btnLock.classList.toggle('muted', btnLock.disabled);
+    }
+  }
+
+  function enterRoom(room, username, messages = [], users = [], owner, ownerUsernameParam, tokenIdFromServer) {
     currentRoom = room.code;
     myUsername = username;
     ownerId = owner || null;
     ownerName = ownerUsernameParam || null;
+    isGlobalRoom = !!room.isGlobal;
+
+    if (tokenIdFromServer) roomTokenId = tokenIdFromServer;
 
     hero.classList.add('hidden');
     pane.classList.remove('hidden');
@@ -309,16 +382,30 @@
       safeIndicator.title = 'Non-safe room — refresh will NOT kill the room';
     }
 
+    setLockUi(!!room.locked);
+
     updateUserList(users, ownerId, ownerUsernameParam);
     messagesEl.innerHTML = '';
     messages.forEach(m => appendMessage(m));
 
+    // Buttons
     if (room.isGlobal) {
       btnClear.disabled = true;
       btnClear.classList.add('muted');
     } else {
       btnClear.disabled = false;
       btnClear.classList.remove('muted');
+    }
+
+    if (btnReassign) {
+      btnReassign.disabled = room.isGlobal || (ownerId !== socket.id);
+      btnReassign.classList.toggle('muted', btnReassign.disabled);
+    }
+
+    if (btnLock) {
+      btnLock.disabled = room.isGlobal || (ownerId !== socket.id);
+      btnLock.classList.toggle('muted', btnLock.disabled);
+      btnLock.textContent = roomLocked ? 'Unlock Room' : 'Lock Room';
     }
 
     pane.classList.add('pane-enter');
@@ -331,6 +418,17 @@
   function updateUserList(users, ownerIdParam, ownerUsernameParam) {
     ownerId = ownerIdParam || ownerId;
     ownerName = ownerUsernameParam || ownerName;
+
+    // Update host-only buttons
+    if (btnReassign) {
+      btnReassign.disabled = isGlobalRoom || (ownerId !== socket.id);
+      btnReassign.classList.toggle('muted', btnReassign.disabled);
+    }
+    if (btnLock) {
+      btnLock.disabled = isGlobalRoom || (ownerId !== socket.id);
+      btnLock.classList.toggle('muted', btnLock.disabled);
+    }
+
     userListEl.innerHTML = '';
     users.forEach(u => {
       const li = document.createElement('li');
@@ -354,14 +452,107 @@
     });
   }
 
+  // --------------------
+  // Host controls
+  // --------------------
+  btnLock && btnLock.addEventListener('click', () => {
+    if (!currentRoom || isGlobalRoom) return;
+    if (ownerId !== socket.id) return showToast('Only host can lock/unlock', 2500, 'error');
+
+    socket.emit('setRoomLocked', { locked: !roomLocked }, (res) => {
+      if (!res || !res.ok) return showToast(res && res.message ? res.message : 'Failed to change lock', 2500, 'error');
+      setLockUi(!!res.locked);
+    });
+  });
+
+  btnReassign && btnReassign.addEventListener('click', () => {
+    if (!currentRoom || isGlobalRoom) return;
+    if (ownerId !== socket.id) return showToast('Only host can reassign', 2500, 'error');
+
+    // Build list from current DOM user list info is not enough; we use last received users cached:
+    // easiest: rebuild from current displayed list by pulling usernames and mapping to socketId is not possible.
+    // So we keep lastUserPayload globally from userList event.
+    if (!lastUserListPayload || !Array.isArray(lastUserListPayload.users)) {
+      showToast('No user list available yet', 2500, 'error');
+      return;
+    }
+
+    renderReassignList(lastUserListPayload.users, ownerId);
+    showModal('reassign');
+  });
+
+  function renderReassignList(users, currentOwnerSocketId) {
+    reassignList.innerHTML = '';
+    users.forEach(u => {
+      const row = document.createElement('button');
+      row.className = 'reassign-row';
+      row.type = 'button';
+      row.textContent = u.username + (u.socketId === currentOwnerSocketId ? ' (current host)' : '');
+      row.disabled = (u.socketId === currentOwnerSocketId);
+      row.addEventListener('click', () => {
+        socket.emit('reassignHost', { targetSocketId: u.socketId }, (res) => {
+          if (!res || !res.ok) return showToast(res && res.message ? res.message : 'Failed to reassign', 2500, 'error');
+          closeModal();
+        });
+      });
+      reassignList.appendChild(row);
+    });
+  }
+
+  // Keep latest user list payload for reassign UI
+  let lastUserListPayload = null;
+
   socket.on('userList', (payload) => {
+    lastUserListPayload = payload || null;
     const users = (payload && payload.users) ? payload.users : [];
     updateUserList(users, payload.ownerId, payload.ownerUsername);
     ownerName = payload.ownerUsername || ownerName;
   });
 
-  socket.on('systemMessage', (m) => appendSystem(m.text || ''));
+  socket.on('systemMessage', (m) => appendSystem(m && m.text ? m.text : ''));
+
   socket.on('newMessage', (m) => appendMessage(m));
+
+  socket.on('messageEdited', (payload) => {
+    if (!payload || !payload.id) return;
+    const el = messagesEl.querySelector(`[data-mid="${cssEscape(payload.id)}"]`);
+    if (!el) return;
+    const body = el.querySelector('.body');
+    if (!body) return;
+
+    const text = payload.text || '';
+    try {
+      const raw = marked.parse(text);
+      const clean = DOMPurify.sanitize(raw);
+      body.innerHTML = clean;
+    } catch {
+      body.innerHTML = escapeHtml(text);
+    }
+
+    const editedTag = el.querySelector('.edited-tag');
+    if (editedTag) editedTag.classList.remove('hidden');
+  });
+
+  socket.on('messageDeleted', (payload) => {
+    if (!payload || !payload.id) return;
+    const el = messagesEl.querySelector(`[data-mid="${cssEscape(payload.id)}"]`);
+    if (!el) return;
+    const body = el.querySelector('.body');
+    if (!body) return;
+
+    body.textContent = 'Message deleted';
+    const editedTag = el.querySelector('.edited-tag');
+    if (editedTag) editedTag.classList.add('hidden');
+
+    // disable actions
+    const actions = el.querySelector('.msg-actions');
+    if (actions) actions.remove();
+  });
+
+  socket.on('roomLockedChanged', (payload) => {
+    if (!payload) return;
+    setLockUi(!!payload.locked);
+  });
 
   socket.on('roomCleared', (payload) => {
     messagesEl.innerHTML = '';
@@ -370,7 +561,6 @@
 
   socket.on('kicked', (payload) => leaveRoom(true, payload && payload.reason));
 
-  // Typing indicator events from server
   socket.on('typing', (payload) => {
     if (!payload || !payload.socketId) return;
     if (payload.typing) typingUsers.set(payload.socketId, payload.username);
@@ -389,7 +579,6 @@
     typingEl.textContent = names.length === 1 ? `${names[0]} is typing...` : `${names.join(', ')} are typing...`;
   }
 
-  // No bans: normal send
   msgForm.addEventListener('submit', (ev) => {
     ev.preventDefault();
     const text = msgInput.value.trim();
@@ -410,10 +599,26 @@
     });
   }
 
+  // SVG icons
+  function svgPencil() {
+    return `
+<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+  <path fill="currentColor" d="M3 17.25V21h3.75L17.8 9.95l-3.75-3.75L3 17.25zm2.92 2.83H5v-.92l9.06-9.06.92.92L5.92 20.08zM20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z"/>
+</svg>`;
+  }
+  function svgTrash() {
+    return `
+<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+  <path fill="currentColor" d="M6 7h12v14H6V7zm3-3h6l1 1h4v2H4V5h4l1-1z"/>
+</svg>`;
+  }
+
   function appendMessage(m) {
+    const mid = getMessageId(m);
+
     const div = document.createElement('div');
     div.className = 'msg';
-    div.setAttribute('data-mid', getMessageId(m));
+    div.setAttribute('data-mid', mid);
 
     if (m.username === myUsername) div.classList.add('me');
     if (ownerName && m.username === ownerName) div.classList.add('host');
@@ -423,10 +628,12 @@
 
     const metaLeft = document.createElement('div');
     metaLeft.className = 'meta-left';
+
     const t = new Date(m.ts || Date.now());
     const who = document.createElement('span');
     who.className = 'meta-who';
     who.textContent = m.username || 'Anon';
+
     const when = document.createElement('span');
     when.className = 'meta-time';
     when.textContent = ` • ${t.toLocaleTimeString()}`;
@@ -438,24 +645,77 @@
     const body = document.createElement('div');
     body.className = 'body';
 
-    if (m.type && m.type === 'sticker') {
+    const isSticker = (m.type && m.type === 'sticker');
+    const isDeleted = (m.deleted === true) || (String(m.text || '') === 'Message deleted');
+
+    if (isSticker && !isDeleted) {
       const img = document.createElement('img');
       img.src = `/assets/stickers/${encodeURIComponent(String(m.text || ''))}`;
       img.alt = 'sticker';
       img.className = 'sticker-img';
       body.appendChild(img);
     } else {
-      try {
-        const raw = marked.parse(m.text || '');
-        const clean = DOMPurify.sanitize(raw);
-        body.innerHTML = clean;
-      } catch {
-        body.innerHTML = escapeHtml(m.text || '');
+      if (isDeleted) {
+        body.textContent = 'Message deleted';
+      } else {
+        try {
+          const raw = marked.parse(m.text || '');
+          const clean = DOMPurify.sanitize(raw);
+          body.innerHTML = clean;
+        } catch {
+          body.innerHTML = escapeHtml(m.text || '');
+        }
       }
     }
 
+    // Edited tag
+    const editedTag = document.createElement('div');
+    editedTag.className = 'edited-tag';
+    editedTag.textContent = 'edited';
+    if (!m.edited) editedTag.classList.add('hidden');
+
     div.appendChild(meta);
     div.appendChild(body);
+    div.appendChild(editedTag);
+
+    // Actions row (always visible)
+    if (!isDeleted) {
+      const actions = document.createElement('div');
+      actions.className = 'msg-actions';
+
+      const btnEdit = document.createElement('button');
+      btnEdit.type = 'button';
+      btnEdit.className = 'msg-action-btn';
+      btnEdit.title = 'Edit';
+      btnEdit.innerHTML = svgPencil();
+
+      const btnDel = document.createElement('button');
+      btnDel.type = 'button';
+      btnDel.className = 'msg-action-btn';
+      btnDel.title = 'Delete';
+      btnDel.innerHTML = svgTrash();
+
+      btnEdit.addEventListener('click', () => {
+        const canTry = (m.username === myUsername); // UI hint only
+        if (!canTry) return showToast('Only the sender can edit', 2000, 'error');
+
+        const newText = prompt('Edit message:', String(m.text || ''));
+        if (newText === null) return;
+        socket.emit('editMessage', { messageId: mid, newText }, (res) => {
+          if (!res || !res.ok) return showToast(res && res.message ? res.message : 'Failed to edit', 2500, 'error');
+        });
+      });
+
+      btnDel.addEventListener('click', () => {
+        socket.emit('deleteMessage', { messageId: mid }, (res) => {
+          if (!res || !res.ok) return showToast(res && res.message ? res.message : 'Failed to delete', 2500, 'error');
+        });
+      });
+
+      actions.appendChild(btnEdit);
+      actions.appendChild(btnDel);
+      div.appendChild(actions);
+    }
 
     div.classList.add('msg-enter');
     messagesEl.appendChild(div);
@@ -507,6 +767,12 @@
   function leaveRoom(kicked = false, reason = '') {
     socket.emit('leaveRoom');
     currentRoom = null;
+    myUsername = null;
+    ownerId = null;
+    ownerName = null;
+    isGlobalRoom = false;
+    roomLocked = false;
+
     hero.classList.remove('hidden');
     pane.classList.add('hidden');
     messagesEl.innerHTML = '';
@@ -536,7 +802,12 @@
   });
 
   function getMessageId(m) {
-    return m.id || m._id || m.mid || (`m_${(m.ts || Date.now())}_${(m.username || 'u').replace(/\s+/g,'')}`);
+    return m && (m.id || m._id || m.mid) || (`m_${(m && m.ts ? m.ts : Date.now())}_${(m && m.username ? m.username : 'u').replace(/\s+/g,'')}`);
+  }
+
+  // basic CSS escape for querySelector usage
+  function cssEscape(s) {
+    return String(s).replace(/["\\]/g, '\\$&');
   }
 
   // STICKERS
