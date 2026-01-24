@@ -134,7 +134,7 @@ This app runs on Node.js as a single process. For production:
 
 ## License
 
-MIT License. See [LICENSE](LICENSE) for details.
+Divine Universal License Agreement. See [LICENSE](LICENSE.md) for details.
 
 ## Credits
 
